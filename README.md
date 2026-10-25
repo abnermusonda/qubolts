@@ -107,6 +107,47 @@ struggles and the samplers start to edge past the classical bar:
 | 60 | −30.5% | +0.3% | +0.3% | +0.4% |
 | 100 | −36.3% | +0.1% | +0.1% | +0.1% |
 
+### 1,000-segment scaling example
+
+A single seeded run with a 15-segment activation cap exercised a much denser
+problem than the multi-seed benchmark above. It generated 499,408 overlapping
+pairs and a QUBO with 1,004 variables and 503,506 interactions. The local
+simulated-annealing solver returned a feasible, non-fallback solution:
+
+| Method | Objective | Segments selected | Spend | Lift vs. naive |
+|---|---:|---:|---:|---:|
+| Naive (value / $) | $41,165.47 | 15 | $1,492.17 | baseline |
+| Greedy (overlap-aware) | $88,207.13 | 15 | $3,510.16 | +114.3% |
+| Qubolts (SA) | $212,447.55 | 15 | $31,811.29 | +416.1% |
+
+The budget was $119,274.25. The run took 33.7 seconds in the backend and
+35.7 seconds end-to-end on an Apple Silicon Mac; timings depend on the machine.
+This is one synthetic instance, not an aggregate benchmark, so the result should
+not be interpreted as a general performance claim.
+
+Reproduce the problem and solver settings with:
+
+```python
+from qubolts import solve
+from qubolts.mktg.segment_selection import SegmentSelection, synthetic_problem
+
+problem = synthetic_problem(n=1000, seed=7, max_segments=15)
+solution = solve(
+    SegmentSelection(),
+    problem,
+    seed=7,
+    num_reads=100,
+    num_sweeps=2000,
+)
+print(solution.to_dict())
+```
+
+Selected segment IDs in that run:
+`seg_206_f26`, `seg_218_f300`, `seg_256_f35`, `seg_339_f320`,
+`seg_514_f114`, `seg_608_f107`, `seg_609_f240`, `seg_667_f63`,
+`seg_841_f183`, `seg_865_f187`, `seg_893_f249`, `seg_903_f206`,
+`seg_937_f148`, `seg_967_f332`, and `seg_979_f296`.
+
 What this says, plainly:
 
 1. **Modeling overlap is the big win**: +16% to +46% unique value over the common
