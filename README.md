@@ -29,6 +29,8 @@ problem ─► build_bqm ─► route ─► sample ─► decode ─► repair 
 ## Install
 
 Until the first PyPI release, install from source: `pip install -e ".[dev]"`.
+The package declares Python `>=3.10`; CI tests Python 3.10, 3.11, 3.12, and
+3.13.
 
 ```bash
 pip install qubolts            # core + local backends
@@ -74,7 +76,8 @@ Every planned module documents its QUBO formulation in its docstring, ready to i
 | Name | Where it runs | Notes |
 |---|---|---|
 | `exact` | local | brute force, ≤ 22 variables; ground truth for tests |
-| `sa` | local | simulated annealing (dwave-samplers); default above 18 variables |
+| `sa` | local CPU | simulated annealing (dwave-samplers); independent reads use bounded worker threads |
+| `torch_sa` | local CUDA / Apple Metal | optional batched PyTorch annealer; approximate synchronous updates |
 | `tabu` | local | multistart tabu search |
 | `descent` | local | steepest descent from random starts; fast floor |
 | `leap_hybrid` | D-Wave Leap | hybrid solver; needs `qubolts[leap]` + `DWAVE_API_TOKEN` |
@@ -84,6 +87,18 @@ Every planned module documents its QUBO formulation in its docstring, ready to i
 Any dimod-compatible sampler plugs in with a ~10-line `Backend` subclass.
 Remote (paid) backends are never chosen automatically unless you allow it with
 `RoutingPolicy(allow_remote=True)`.
+
+Install the optional PyTorch backend with `pip install -e ".[torch]"`. It selects
+CUDA when available, otherwise Apple Metal (MPS); override the choice with
+`device="cuda"` or `device="mps"` when calling `solve(..., backend="torch_sa")`.
+The threaded CPU backend accepts `num_workers` as a sampler argument; by default
+it selects a small worker count for modest QUBOs and stays serial for dense
+models to avoid multiplying graph memory. The GPU backend updates variables in
+parallel, so its annealing dynamics differ from serial Metropolis SA and should
+be compared against the resolver baseline. Generic QUBO annealing is not
+currently implemented for NPUs: their supported operators and execution models
+do not fit this iterative solver. NPU support would need a specialized backend
+and explicit hardware/runtime support.
 
 ## Benchmarks (honest ones)
 
@@ -147,6 +162,76 @@ Selected segment IDs in that run:
 `seg_514_f114`, `seg_608_f107`, `seg_609_f240`, `seg_667_f63`,
 `seg_841_f183`, `seg_865_f187`, `seg_893_f249`, `seg_903_f206`,
 `seg_937_f148`, `seg_967_f332`, and `seg_979_f296`.
+
+### Hyper-segmentation: from cohorts to audiences of one
+
+The second runnable example simulates 60 people and three candidate audience
+granularities: 6 broad family cohorts, 12 cohorts split by intent, and 60
+single-person audiences. Each person has a synthetic expected value and media
+cost. Audience activation adds a tier-specific setup cost, so very fine
+granularity is not free. The campaign is limited to a $30 budget and 12 active
+audiences.
+
+Unlike the segment-selection examples above, this model calculates the value of
+the **union of reached people** directly. If multiple selected audiences contain
+the same person, that person's value is counted only once. The higher-order
+coverage objective is reduced to a QUBO with auxiliary variables.
+
+Run it from the repository root:
+
+```bash
+PYTHONPATH=. python examples/hyper_segmentation.py
+```
+
+Observed result for population seed `21` and sampler seed `21`:
+
+| Strategy | Unique value | Unique reach | Audiences | Spend |
+|---|---:|---:|---:|---:|
+| Broad-only greedy | $332.46 | 30 / 60 | 3 | $23.88 |
+| Micro-only greedy | $417.58 | 35 / 60 | 7 | $27.15 |
+| Singleton-only greedy | $156.09 | 12 / 60 | 12 | $7.49 |
+| Mixed Qubolts (SA) | $417.58 | 35 / 60 | 7 | $27.15 |
+
+The mixed QUBO had 94 variables and 3,405 interactions. In this run, simulated
+annealing did **not** find a candidate better than the strongest single-tier
+baseline; Qubolts returned the micro-only plan through its baseline safeguard.
+The backend took 0.123 seconds and total solve time was 0.135 seconds on an
+Apple Silicon Mac. This one synthetic run illustrates the trade-off, not a
+general claim: finer targeting reached fewer people under the activation cap,
+while micro cohorts gave the best value in this generated population.
+
+The example is intentionally small enough to run locally. At larger scales,
+person-level reach variables and the auxiliary terms used to model overlapping
+audiences can make the QUBO dense; real use would also need calibrated values,
+activation costs, privacy constraints, and uncertainty estimates. This
+simulation is not a privacy or targeting recommendation.
+
+#### 6,000-person Metal run
+
+The example accepts CLI options so a larger run can be reproduced without
+editing the script. On an Apple M5 Pro, this invocation built a 6,034-variable
+QUBO with 18,135,255 interactions and completed end-to-end in 22.6 seconds:
+
+```bash
+PYTHONPATH=. python examples/hyper_segmentation.py \
+  --people 6000 \
+  --backend torch_sa \
+  --device mps \
+  --num-reads 8 \
+  --num-sweeps 10 \
+  --candidates 8
+```
+
+| Backend result | Unique value | Unique reach | Audiences | Spend |
+|---|---:|---:|---:|---:|
+| Best tier baseline (micro) | $54,346.77 | 5,000 / 6,000 | 10 | $2,761.09 |
+| Qubolts (MPS) | $54,346.77 | 5,000 / 6,000 | 10 | $2,761.09 |
+
+GPU sampling and candidate repair took 0.86 seconds; QUBO construction was the
+largest measured stage. No sampled candidate beat the micro-only baseline, so
+the baseline safeguard returned that feasible plan. The 8-read, 10-sweep
+configuration is a smoke/scale test, not a quality comparison with longer
+annealing runs. Times are from one machine and can vary.
 
 What this says, plainly:
 

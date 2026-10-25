@@ -48,10 +48,7 @@ for label, objective, decision in (
     lift = (objective - naive) / abs(naive) if naive else 0.0
     objective_text = f"${objective:,.2f}"
     spend_text = f"${spend:,.2f}"
-    print(
-        f"{label:<25} {objective_text:>13} {len(decision):>9} "
-        f"{spend_text:>13} {lift:>+10.1%}"
-    )
+    print(f"{label:<25} {objective_text:>13} {len(decision):>9} {spend_text:>13} {lift:>+10.1%}")
 
 print("\nExecution")
 print("-" * 52)
@@ -69,8 +66,7 @@ if solution.metadata["error"]:
 print("\nSelected segments")
 print("-" * 80)
 print(
-    f"{'ID':<16} {'Reachable users':>16} {'Value / user':>14} "
-    f"{'Cost':>12} {'Standalone value':>18}"
+    f"{'ID':<16} {'Reachable users':>16} {'Value / user':>14} {'Cost':>12} {'Standalone value':>18}"
 )
 print("-" * 80)
 for segment in problem.segments:

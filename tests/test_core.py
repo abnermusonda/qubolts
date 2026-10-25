@@ -53,6 +53,54 @@ def test_backend_failure_falls_back_to_baseline():
         solve(SegmentSelection(), p, backend="broken", fallback=False)
 
 
+def test_sa_parallel_splits_reads_across_workers():
+    bqm = dimod.BinaryQuadraticModel(
+        {"a": -1.0, "b": -1.0, "c": -1.0},
+        {("a", "b"): 0.5, ("b", "c"): 0.5},
+        0.0,
+        "BINARY",
+    )
+
+    samples = backends.get("sa").sample(bqm, num_reads=5, num_sweeps=10, num_workers=2, seed=7)
+
+    assert len(samples) == 5
+
+
+def test_torch_sa_can_sample_on_explicit_cpu_device():
+    pytest.importorskip("torch")
+    bqm = dimod.BinaryQuadraticModel(
+        {"a": -1.0, "b": -1.0, "c": -1.0},
+        {("a", "b"): 0.5, ("b", "c"): 0.5},
+        0.0,
+        "BINARY",
+    )
+
+    samples = backends.get("torch_sa").sample(bqm, device="cpu", num_reads=4, num_sweeps=10, seed=7)
+
+    assert len(samples) == 4
+    assert all(sample["a"] in (0, 1) for sample in samples.samples())
+
+
+def test_torch_sa_can_sample_on_mps_when_available():
+    torch = pytest.importorskip("torch")
+    if not hasattr(torch.backends, "mps") or not torch.backends.mps.is_available():
+        pytest.skip("Apple Metal is unavailable")
+    bqm = dimod.BinaryQuadraticModel(
+        {"a": -1.0, "b": -1.0, "c": -1.0},
+        {("a", "b"): 0.5, ("b", "c"): 0.5},
+        0.25,
+        "BINARY",
+    )
+
+    samples = backends.get("torch_sa").sample(bqm, device="mps", num_reads=4, num_sweeps=10, seed=7)
+
+    assert len(samples) == 4
+    assert all(
+        row.energy == pytest.approx(bqm.energy(row.sample), abs=1e-5)
+        for row in samples.data(["sample", "energy"])
+    )
+
+
 def test_planned_resolvers_fail_loudly():
     with pytest.raises(NotImplementedError, match="planned"):
         Allocation().build_bqm(None)
